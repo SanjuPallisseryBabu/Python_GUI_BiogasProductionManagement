@@ -5,7 +5,6 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from tkcalendar import DateEntry
 
-
 # Main window
 root = tk.Tk()
 root.title("Python GUI App")
@@ -21,9 +20,6 @@ root.config(bg='#FFFFFF')
 # Tabs
 notebook = ttk.Notebook(root)
 notebook.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky='nsew')
-
-# Place the notebook widget in the grid
-notebook.grid(row=0, column=0, sticky="nsew")
 
 # Configure grid row and column weights to make the notebook expand
 root.grid_rowconfigure(0, weight=1)
@@ -61,7 +57,6 @@ load_tab = tk.Frame(notebook,bg="#F0F0F0")
 preprocess_tab = tk.Frame(notebook)
 model_tab = tk.Frame(notebook)
 control_tab = tk.Frame(notebook)
-model_tab = tk.Frame(notebook)
 feeding_tab = tk.Frame(notebook)
 
 notebook.add(load_tab, text="Load Data")
@@ -92,9 +87,20 @@ def load_file():
         radio_var.set("No")  # Set the radio button to "No"
         status_label.config(text="No file selected")  # Update status
 
+def on_enter(event):
+    load_button['background'] = '#d0eaff'  # Light blue color on hover
+
+def on_leave(event):
+    load_button['background'] = 'SystemButtonFace'  # Default button color
+
+
 # Button
 load_button = tk.Button(load_frame, text="Load Data", font=("Arial", 10), bd=1, relief="solid", command=load_file)
 load_button.grid(row=1, column=0, padx=(20, 20), pady=3, ipadx=15, ipady=0) 
+
+# Bind hover effects
+load_button.bind("<Enter>", on_enter)  # When mouse enters the button
+load_button.bind("<Leave>", on_leave)  # When mouse leaves the button
 
 # Load frame2 for radiobutton and labels
 load_frame2 = tk.Frame(load_frame)
@@ -119,7 +125,6 @@ status_label.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 toggle_label = tk.Label(load_frame, text="Data load is complete", font=("Arial", 10))
 toggle_label.grid(row=1, column=1, padx=(10,40), pady=3, sticky="w")  
 
-
 # Configure grid for load_frame
 load_frame.grid_columnconfigure(0, weight=1)
 load_frame.grid_columnconfigure(1, weight=1)
@@ -129,6 +134,7 @@ load_frame.grid_rowconfigure(1, weight=1)
 # Create a grid layout for the Step Downwards and Step Upwards sections
 load_tab.grid_columnconfigure(0, weight=1)
 load_tab.grid_columnconfigure(1, weight=1)
+
 # Step Downwards section
 down_frame = tk.LabelFrame(load_tab, borderwidth=0, relief="flat", bg="#F0F0F0",font=("Arial", 8))
 down_frame.grid(row=2, column=0, padx=10, pady=(20,0), sticky='nsew')
@@ -172,7 +178,6 @@ up_frame.grid_columnconfigure(0, weight=1)
 up_frame.grid_columnconfigure(1, weight=1)
 up_frame.grid_columnconfigure(2, weight=1)
 up_frame.grid_columnconfigure(3, weight=1)
-up_frame.grid_rowconfigure(0, weight=0)  # Ensure the title row does not expand
 
 # Start and End date labels and DateEntry widgets in the same row for Step Up
 start_label_up = tk.Label(up_frame, text="Start date", bg="#F0F0F0")
@@ -246,14 +251,19 @@ preprocess_frame.grid_columnconfigure(0, weight=1)  # Empty column on the left
 preprocess_frame.grid_columnconfigure(2, weight=1)  # Empty column on the right
 preprocess_frame.grid_rowconfigure(0, weight=1)     # Row configuration to allow vertical centering
 
-# Add a button to the middle column (column 1)
-button = tk.Button(preprocess_frame, text="Preprocessing", font=("Arial", 10, "bold"), bd=1, relief="solid", padx=0, pady=0)
-button.grid(row=0, column=1, padx=10, pady=10, ipadx=5,ipady=5,sticky="")  # Leave sticky="" for it to stay centered
+# Function to change tabs
+def next_tab():
+    current_index = notebook.index(notebook.select())
+    next_index = (current_index + 1) % notebook.index("end")
+    notebook.select(next_index)
 
-# Configure load_tab to expand the frame
-load_tab.grid_rowconfigure(4, weight=1)
-load_tab.grid_columnconfigure(0, weight=1)
+# Button for preprocessing
+preprocess_button = tk.Button(preprocess_frame, text="Preprocessing", font=("Arial", 10), command=next_tab)
+preprocess_button.grid(row=0, column=1, padx=10, pady=10, ipadx=5, ipady=5, sticky="") # Leave sticky="" for it to stay centered
 
+# Preprocessing Tab UI
+preprocess_label = tk.Label(preprocess_tab, text="This is the Preprocessing tab", font=("Arial", 16))
+preprocess_label.pack(pady=20)
 
-# Run the main loop
+# Start the application
 root.mainloop()
