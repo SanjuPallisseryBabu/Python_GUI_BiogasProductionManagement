@@ -142,20 +142,18 @@ def on_enter(event):
 def on_leave(event):
     load_button['background'] = 'SystemButtonFace'  # Default button color
 
+# Function to create step upward plot
 def create_plot_step_upward():
     if biogas_data is not None and substrate_data is not None:
-        start_date = start_date_up.get()
-        end_date = end_date_up.get()
-        
         try:
-            start_date = pd.to_datetime(start_date)
-            end_date = pd.to_datetime(end_date)
+            start_date = pd.to_datetime(start_date_up.get())
+            end_date = pd.to_datetime(end_date_up.get())
 
-            # Filter the data based on the date range
             filtered_biogas = biogas_data[(biogas_data['TimeStamp'] >= start_date) & (biogas_data['TimeStamp'] <= end_date)]
             filtered_substrate = substrate_data[(substrate_data['TimeStamp'] >= start_date) & (substrate_data['TimeStamp'] <= end_date)]
 
-            fig2, ax1 = plt.subplots(figsize=(9, 5))
+            fig2.clear()
+            ax1 = fig2.add_subplot(111)
 
             # Step upward plot for biogas production rate
             ax1.step(filtered_biogas['TimeStamp'], filtered_biogas['ValueNum'], where="pre", color='blue', linestyle='--', label='Biogas Production Rate (Step Upward)')
@@ -170,41 +168,32 @@ def create_plot_step_upward():
             ax2.set_ylabel("Substrate Feeding [t]", color='red')
             ax2.tick_params(axis="y", labelcolor='red')
 
-            ax1.xaxis.set_major_locator(mdates.HourLocator(interval=12))
+            # Set x-axis major locator to 12-hour intervals, format, and smaller font size
+            ax1.xaxis.set_major_locator(mdates.DayLocator(interval=1))
             ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %H:%M'))
-            fig2.autofmt_xdate()
+            plt.xticks(rotation=0, fontsize=8)  # Straight labels with smaller font size
 
             fig2.tight_layout()
-            fig2.legend(loc="upper right", bbox_to_anchor=(0.85, 0.85))
-            plt.grid(True)
-
-            canvas2.figure = fig2
             canvas2.draw()
         except Exception as e:
             error_label.config(text=f"Error: {e}")
 
-
-# Function to create and display the plot
+# Function to create step downward plot
 def create_plot_step_downward():
     if biogas_data is not None and substrate_data is not None:
-        start_date = start_date_down.get()
-        end_date = end_date_down.get()
-        
         try:
-            start_date = pd.to_datetime(start_date)
-            end_date = pd.to_datetime(end_date)
+            start_date = pd.to_datetime(start_date_down.get())
+            end_date = pd.to_datetime(end_date_down.get())
 
-            # Filter the data based on the date range
             filtered_biogas = biogas_data[(biogas_data['TimeStamp'] >= start_date) & (biogas_data['TimeStamp'] <= end_date)]
             filtered_substrate = substrate_data[(substrate_data['TimeStamp'] >= start_date) & (substrate_data['TimeStamp'] <= end_date)]
 
             # Adjust values to create a downward trend
-            max_biogas = filtered_biogas['ValueNum'].max()
-            max_substrate = filtered_substrate['ValueNum'].max()
-            filtered_biogas['AdjustedValue'] = max_biogas - filtered_biogas['ValueNum']
-            filtered_substrate['AdjustedValue'] = max_substrate - filtered_substrate['ValueNum']
+            filtered_biogas['AdjustedValue'] = filtered_biogas['ValueNum'].max() - filtered_biogas['ValueNum']
+            filtered_substrate['AdjustedValue'] = filtered_substrate['ValueNum'].max() - filtered_substrate['ValueNum']
 
-            fig1, ax1 = plt.subplots(figsize=(9, 5))
+            fig1.clear()
+            ax1 = fig1.add_subplot(111)
 
             # Step downward plot for biogas production rate
             ax1.step(filtered_biogas['TimeStamp'], filtered_biogas['AdjustedValue'], where="post", color='blue', linestyle='--', label='Biogas Production Rate (Step Downward)')
@@ -219,18 +208,16 @@ def create_plot_step_downward():
             ax2.set_ylabel("Substrate Feeding [t]", color='red')
             ax2.tick_params(axis="y", labelcolor='red')
 
-            ax1.xaxis.set_major_locator(mdates.HourLocator(interval=12))
+            # Set x-axis major locator to 12-hour intervals, format, and smaller font size
+            ax1.xaxis.set_major_locator(mdates.DayLocator(interval=1))
             ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b %d, %H:%M'))
-            fig1.autofmt_xdate()
+            plt.xticks(rotation=0, fontsize=8)  # Straight labels with smaller font size
 
             fig1.tight_layout()
-            fig1.legend(loc="upper right", bbox_to_anchor=(0.85, 0.85))
-            plt.grid(True)
-
-            canvas1.figure = fig1
             canvas1.draw()
         except Exception as e:
             error_label.config(text=f"Error: {e}")
+
 
 
 # Button
@@ -359,35 +346,38 @@ error_label = ttk.Label(up_frame, text="", foreground="red")
 error_label.grid()
 
 # Create a new frame for charts
-chart_frame = tk.LabelFrame(load_tab, borderwidth=0, relief="flat", bg="#F0F0F0",width=600, height=300)
-chart_frame.grid(row=3, column=0,columnspan=2,padx=10, pady=0, sticky="nsew")
+chart_frame = tk.LabelFrame(load_tab, borderwidth=0, relief="flat", bg="#F0F0F0", width=500, height=300)
+chart_frame.grid(row=3, column=0, columnspan=2, padx=10, pady=0, sticky="nsew")
 chart_frame.grid_propagate(False)  # Prevent the frame from resizing to fit its contents
 
-# Configure the chart frame for 2-column layout
-chart_frame.grid_columnconfigure(0, weight=1)  # First column for the first chart
-chart_frame.grid_columnconfigure(1, weight=1)  # Second column for the second chart
-chart_frame.grid_rowconfigure(0, weight=1)     # Ensure the row expands to fit both charts
+# Configure the chart frame for a 2-column layout
+chart_frame.grid_columnconfigure(0, weight=1)
+chart_frame.grid_columnconfigure(1, weight=1)
+chart_frame.grid_rowconfigure(0, weight=1)
 
-# Create the first chart (Before data processing)
-fig1, ax1 = plt.subplots(figsize=(5,3), dpi=35)
-fig1.patch.set_facecolor('#F0F0F0')  # Set the background color of the figure (outside the plot area)
-ax1 = fig1.add_subplot(111)
-
+# Create empty figures for the charts
+fig1, ax1 = plt.subplots()
+fig2, ax2 = plt.subplots()
 
 # Embed the first chart in the chart_frame
 canvas1 = FigureCanvasTkAgg(fig1, master=chart_frame)
 canvas1.get_tk_widget().grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 canvas1.draw()
 
-# Create the second chart (After data processing)
-fig2, ax2 = plt.subplots(figsize=(5,3), dpi=35)
-fig2.patch.set_facecolor('#F0F0F0')  # Set the background color of the figure (outside the plot area)
-ax3 = fig2.add_subplot(111)
-
 # Embed the second chart in the chart_frame
 canvas2 = FigureCanvasTkAgg(fig2, master=chart_frame)
 canvas2.get_tk_widget().grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 canvas2.draw()
+
+# Function to update the canvas size when the window is resized
+def resize_canvas(event):
+    fig1.set_size_inches(chart_frame.winfo_width() / 200, chart_frame.winfo_height() / 150)
+    fig2.set_size_inches(chart_frame.winfo_width() / 200, chart_frame.winfo_height() / 150)
+    canvas1.draw()
+    canvas2.draw()
+
+# Bind the resize event to update canvas size when the window is resized
+chart_frame.bind("<Configure>", resize_canvas)
 
 # Configure load_tab to expand the frame
 load_tab.grid_rowconfigure(3, weight=1)
@@ -407,89 +397,7 @@ def next_tab():
 # Function to handle the Preprocessing Button click from the Load tab
 def preprocessing_button_pushed():
     next_tab()  # Switch to the Preprocess tab
-    display_plots_in_columns()  # Display plots in the Preprocess tab
-
-def display_plots_in_columns():
-    # Ensure both datasets are loaded
-    if biogas_data is None or substrate_data is None:
-        error_label.config(text="Please load both biogas and substrate data files first.")
-        return
-
-    # Extract TimeStamp and ValueNum data from the loaded CSV files
-    biogas_time = pd.to_datetime(biogas_data['TimeStamp']).tolist()
-    substrate_time = pd.to_datetime(substrate_data['TimeStamp']).tolist()
-    biogas_flowrate = biogas_data['ValueNum'].tolist()
-    substrate_feed = substrate_data['ValueNum'].tolist()
-
-    # Downward plot (reverse data for a downward effect)
-    downward_flowrate = biogas_flowrate[::-1]
-    downward_feed = substrate_feed[::-1]
-
-    # Upward plot (cumulative sum for upward effect)
-    upward_flowrate = list(pd.Series(biogas_flowrate).cumsum())
-    upward_feed = list(pd.Series(substrate_feed).cumsum())
-
-    # Clear any existing widgets in preprocess_frame
-    for widget in preprocess_frame.winfo_children():
-        widget.destroy()
-
-    # Configure grid columns and rows to be responsive
-    preprocess_frame.grid_columnconfigure(0, weight=1)
-    preprocess_frame.grid_columnconfigure(1, weight=1)
-    preprocess_frame.grid_rowconfigure(0, weight=1)
-    preprocess_frame.grid_rowconfigure(1, weight=10)
-
-    # Add titles with minimized padding
-    title_label_down = tk.Label(preprocess_frame, text="Preprocessed data for step downwards", font=("Arial", 12, "bold"))
-    title_label_down.grid(row=0, column=0, padx=5, pady=(5, 2), sticky="n")
-
-    title_label_up = tk.Label(preprocess_frame, text="Preprocessed data for step upwards", font=("Arial", 12, "bold"))
-    title_label_up.grid(row=0, column=1, padx=5, pady=(5, 2), sticky="n")
-
-    # Plot downward data in the first column
-    create_plot_canvas(
-        preprocess_frame, 
-        biogas_time[::-1], downward_flowrate, substrate_time[::-1], downward_feed,
-        'After data preprocessing', 'upper right', 2, 1, 0, step=True
-    )
-
-    # Plot upward data in the second column
-    create_plot_canvas(
-        preprocess_frame, 
-        biogas_time, upward_flowrate, substrate_time, upward_feed,
-        'After data preprocessing', 'upper right', 2, 1, 1, step=True
-    )
-
-def create_plot_canvas(frame, x1, y1, x2, y2, title, legend_position, line_width, row, column, step=False):
-    fig, ax = plt.subplots()
-    
-    # Set the title inside the axes to reduce external padding
-    ax.set_title(title, pad=10)
-    
-    # Plot each dataset as a step plot if `step` is True
-    if step:
-        # Plot both datasets using their respective x and y values
-        ax.step(x1, y1, label='Biogas Flowrate', linewidth=line_width, where='post')
-        ax.step(x2, y2, label='Substrate Feed', linewidth=line_width, where='post')
-    else:
-        # Regular line plot if `step` is False
-        ax.plot(x1, y1, label='Biogas Flowrate', linewidth=line_width)
-        ax.plot(x2, y2, label='Substrate Feed', linewidth=line_width)
-
-    # Position the legend
-    ax.legend(loc=legend_position)
-
-    # Apply tight layout to minimize extra space around the plot
-    fig.tight_layout()
-
-    # Embed the plot in the tkinter frame using FigureCanvasTkAgg
-    canvas = FigureCanvasTkAgg(fig, master=frame)
-    canvas.draw()
-    canvas.get_tk_widget().grid(row=row, column=column, padx=5, pady=(2, 10), sticky="nsew")
-
-    # Ensure responsiveness within the preprocess_frame
-    frame.grid_rowconfigure(row, weight=1)
-    frame.grid_columnconfigure(column, weight=1)
+   # display_plots_in_columns()  # Display plots in the Preprocess tab
 
 # Configure grid for preprocess_frame to make it fully responsive
 preprocess_frame.grid_columnconfigure(0, weight=1)
@@ -499,29 +407,6 @@ preprocess_frame.grid_columnconfigure(2, weight=1)
 # Button for preprocessing in load tab
 preprocess_button = tk.Button(preprocess_frame, text="Preprocessing", font=("Arial", 10), command=preprocessing_button_pushed)
 preprocess_button.grid(row=0, column=1, padx=10, pady=10, ipadx=5, ipady=5, sticky="")
-
-# Frame inside Preprocess tab for plots, starting at the very top of the tab
-preprocess_frame = tk.Frame(preprocess_tab, borderwidth=0, relief="flat", bg="#F0F0F0")
-preprocess_frame.grid(row=0, column=0, sticky="nsew")  # Set row=0 and remove padx, pady
-
-# Configure preprocess_tab to fully expand preprocess_frame without any extra space
-preprocess_tab.grid_rowconfigure(0, weight=1)   # Allow preprocess_frame to expand vertically
-preprocess_tab.grid_columnconfigure(0, weight=1)  # Allow preprocess_frame to expand horizontally
-
-# Configure preprocess_frame for responsiveness
-preprocess_frame.grid_columnconfigure(0, weight=1)
-preprocess_frame.grid_columnconfigure(1, weight=1)
-
-# Event handlers for hover effects on the button
-def on_enter(event):
-    preprocess_button['background'] = '#d0eaff'  # Light blue color on hover
-
-def on_leave(event):
-    preprocess_button['background'] = 'SystemButtonFace'  # Default button color
-
-# Bind hover effects
-preprocess_button.bind("<Enter>", on_enter)
-preprocess_button.bind("<Leave>", on_leave)
 
 #########################################################################################
 # Start the application
