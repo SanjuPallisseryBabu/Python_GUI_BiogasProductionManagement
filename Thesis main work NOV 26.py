@@ -552,14 +552,25 @@ def update_step_downward_plot(smoothed=False):
         ax1_down.yaxis.set_minor_locator(plt.MultipleLocator(1))
         ax1_down.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{int(x)}"))
 
-        # Plot Substrate Feeding on secondary y-axis
-        substrate_plot, = ax2_down.step(substrate_segment['TimeStamp'], substrate_segment[value_col], where="post",
-                                        color='red', label='Substrate Feeding (Step Downward)')
-        ax2_down.set_ylabel("Substrate Feeding [t]", color='red')
+        # Substrate Feeding Rate preprocessing
+        substrate_segment['Derivative'] = substrate_segment['ValueNum'].diff().clip(lower=0)
+        substrate_segment['FeedingRate'] = substrate_segment['Derivative'].fillna(0)
+        processed_substrate = substrate_segment[substrate_segment['FeedingRate'] > 0]
+
+        # Dynamically adjust y-axis for FeedingRate
+        ax2_down.set_ylim(processed_substrate['FeedingRate'].min() - 0.1, processed_substrate['FeedingRate'].max() + 0.1)
+
+        # Plot Substrate Feeding Rate (Red Line)
+        if not processed_substrate.empty:
+            substrate_plot, = ax2_down.step(processed_substrate['TimeStamp'], processed_substrate['FeedingRate'], where="post",
+                                            color='red', label='Substrate Feeding Rate (Step Downward)')
+        else:
+            print("No valid substrate feeding rate to plot.")
+
+        ax2_down.set_ylabel("Substrate Feeding Rate [t/h]", color='red')
         ax2_down.tick_params(axis="y", labelcolor='red')
 
         # Synchronize secondary y-axis intervals
-        ax2_down.set_ylim(0, 0.7)
         ax2_down.yaxis.set_major_locator(plt.MultipleLocator(0.1))
         ax2_down.yaxis.set_minor_locator(plt.MultipleLocator(0.05))
         ax2_down.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.1f}"))
@@ -592,11 +603,11 @@ def update_step_downward_plot(smoothed=False):
         fig_down.tight_layout()
         canvas_down.draw()
 
-    except ValueError as e:
-        print(f"Error parsing dates or filtering data: {e}")
+    except Exception as e:
+        print(f"Error during graph preprocessing and plotting: {e}")
 
 
-# Update function for Step Upward Plot (with customized x-axis formatting)
+
 def update_step_upward_plot(smoothed=False):
     global ax1_up, ax2_up, is_smoothed_up
 
@@ -654,14 +665,25 @@ def update_step_upward_plot(smoothed=False):
         ax1_up.yaxis.set_minor_locator(plt.MultipleLocator(1))
         ax1_up.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{int(x)}"))
 
-        # Plot Substrate Feeding on secondary y-axis
-        substrate_plot, = ax2_up.step(substrate_segment['TimeStamp'], substrate_segment[value_col], where="post",
-                                      color='red', label='Substrate Feeding (Step Upward)')
-        ax2_up.set_ylabel("Substrate Feeding [t]", color='red')
+        # Substrate Feeding Rate preprocessing
+        substrate_segment['Derivative'] = substrate_segment['ValueNum'].diff().clip(lower=0)
+        substrate_segment['FeedingRate'] = substrate_segment['Derivative'].fillna(0)
+        processed_substrate = substrate_segment[substrate_segment['FeedingRate'] > 0]
+
+        # Dynamically adjust y-axis for FeedingRate
+        ax2_up.set_ylim(processed_substrate['FeedingRate'].min() - 0.1, processed_substrate['FeedingRate'].max() + 0.1)
+
+        # Plot Substrate Feeding Rate on secondary y-axis
+        if not processed_substrate.empty:
+            substrate_plot, = ax2_up.step(processed_substrate['TimeStamp'], processed_substrate['FeedingRate'], where="post",
+                                          color='red', label='Substrate Feeding Rate (Step Upward)')
+        else:
+            print("No valid substrate feeding rate to plot.")
+
+        ax2_up.set_ylabel("Substrate Feeding Rate [t/h]", color='red')
         ax2_up.tick_params(axis="y", labelcolor='red')
 
         # Synchronize secondary y-axis intervals
-        ax2_up.set_ylim(0, 0.7)
         ax2_up.yaxis.set_major_locator(plt.MultipleLocator(0.1))
         ax2_up.yaxis.set_minor_locator(plt.MultipleLocator(0.05))
         ax2_up.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.1f}"))
@@ -688,14 +710,15 @@ def update_step_upward_plot(smoothed=False):
         ax1_up.grid(which='both', linestyle='--', linewidth=0.5)
 
         # Update title
-        ax1_up.set_title("After Data Preprocessing", fontsize=12, fontweight='bold')
+        ax1_up.set_title("After Data Preprocessing", fontsize=10, fontweight='bold')
 
         # Update canvas
         fig_up.tight_layout()
         canvas_up.draw()
 
-    except ValueError as e:
-        print(f"Error parsing dates or filtering data: {e}")
+    except Exception as e:
+        print(f"Error during graph preprocessing and plotting: {e}")
+
 
 
 ###########################
