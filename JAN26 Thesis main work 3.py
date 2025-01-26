@@ -2094,485 +2094,309 @@ def find_inflection_point(flowrate_values, timestamps):
         print(f"Error finding inflection point: {e}")
         return None, None
 
-def zeitkonstantesumme(flowrate, feed, ind_sprung, feed_max, feed_min, 
-                      flowrate_max, flowrate_min, timestamps, step_dir):
-    """
-    More robust implementation of zeitkonstantesumme function
-    """
-    try:
-        # Initialize results dictionary
-        zt = {}
-        
-        # Validate inputs
-        if not np.all(np.isfinite(flowrate)) or not np.all(np.isfinite(feed)):
-            raise ValueError("Input arrays contain inf or NaN values")
-            
-        # Calculate gain with safety checks
-        feed_diff = feed_max - feed_min
-        if abs(feed_diff) < 1e-10:  # Avoid division by zero
-            feed_diff = 1e-10
-        zt['K'] = (flowrate_max - flowrate_min) / feed_diff
-        
-        # Safety check on gain
-        if not np.isfinite(zt['K']):
-            zt['K'] = 1.0  # Fallback to unity gain if calculation fails
-            
-        # Get timestamps as numeric values
-        timestamp_numeric = mdates.date2num(timestamps)
-        
-        # Calculate inflection point
-        derivative = np.gradient(flowrate)
-        second_derivative = np.gradient(derivative)
-        
-        if 'down' in step_dir:
-            # Find where second derivative crosses zero from negative to positive
-            inflection_candidates = np.where(np.diff(np.signbit(second_derivative)))[0]
-            if len(inflection_candidates) > 0:
-                ind_wp = inflection_candidates[0]
-            else:
-                ind_wp = np.argmin(derivative)  # Fallback
+def convert_timedelta_to_seconds(td):
+    """Convert numpy.timedelta64 to seconds"""
+    return td.astype('timedelta64[s]').astype(np.int64)
+
+def zeitkonstantesumme(flowrate, feed, ind_sprung, feed_max, feed_min, flowrate_max, flowrate_min, ind_wp, steigung_wp, step_dir):
+    zt = {}
+    
+    flowrate_values = flowrate['interp_y_smooth'].values
+    timestamps = flowrate['interp_dt'].values
+    feed_values = feed['interp_diff_substrate_feed'].values
+    
+    zt['K'] = (flowrate_max - flowrate_min) / (feed_max - feed_min)
+    
+    zt['ind_sprung'] = ind_sprung
+    zt['zeit_sprung'] = timestamps[ind_sprung]
+    
+    zt['index'] = ind_wp
+    zt['steigung'] = steigung_wp
+    zt['wert'] = flowrate_values[ind_wp]
+    zt['offset'] = zt['wert'] - zt['steigung'] * zt['index']
+    zt['t'] = np.arange(len(timestamps))
+    zt['gleichung'] = zt['steigung'] * zt['t'] + zt['offset']
+    
+    if 'down' in step_dir:
+        tu_indices = np.where(zt['gleichung'] > flowrate_max)[0]
+        tg_indices = np.where(zt['gleichung'] < flowrate_min)[0]
+        if len(tu_indices) > 0 and len(tg_indices) > 0:
+            zt['ind_Tu'] = tu_indices[-1]
+            zt['ind_Tg'] = tg_indices[0]
         else:
-            # Find where second derivative crosses zero from positive to negative
-            inflection_candidates = np.where(np.diff(np.signbit(-second_derivative)))[0]
-            if len(inflection_candidates) > 0:
-                ind_wp = inflection_candidates[0]
-            else:
-                ind_wp = np.argmax(derivative)  # Fallback
-                
-        steigung_wp = derivative[ind_wp]
-        
-        # Calculate Tu and Tg using tangent line method
-        # Ensure reasonable values for slope to avoid numerical issues
-        if abs(steigung_wp) < 1e-10:
-            steigung_wp = 1e-10 if steigung_wp >= 0 else -1e-10
-            
-        tangent_line = steigung_wp * np.arange(len(flowrate)) + (flowrate[ind_wp] - steigung_wp * ind_wp)
-        
-        # Find crossing points with reasonable bounds
-        if 'down' in step_dir:
-            tu_candidates = np.where(tangent_line > flowrate_max)[0]
-            tg_candidates = np.where(tangent_line < flowrate_min)[0]
+            zt['ind_Tu'] = ind_sprung
+            zt['ind_Tg'] = ind_sprung + 1
+    else:
+        tu_indices = np.where(zt['gleichung'] < flowrate_min)[0]
+        tg_indices = np.where(zt['gleichung'] > flowrate_max)[0]
+        if len(tu_indices) > 0 and len(tg_indices) > 0:
+            zt['ind_Tu'] = tu_indices[-1]
+            zt['ind_Tg'] = tg_indices[0]
         else:
-            tu_candidates = np.where(tangent_line < flowrate_min)[0]
-            tg_candidates = np.where(tangent_line > flowrate_max)[0]
-            
-        # Ensure valid indices are found
-        if len(tu_candidates) > 0 and len(tg_candidates) > 0:
-            zt['ind_Tu'] = tu_candidates[-1] if 'down' in step_dir else tu_candidates[0]
-            zt['ind_Tg'] = tg_candidates[0] if 'down' in step_dir else tg_candidates[-1]
-        else:
-            # Fallback to reasonable defaults
-            zt['ind_Tu'] = ind_sprung + len(flowrate) // 10
-            zt['ind_Tg'] = ind_sprung + len(flowrate) // 5
-        
-        # Calculate time constants with bounds checking
-        zt['Tu'] = max(1.0, (timestamp_numeric[zt['ind_Tu']] - 
-                            timestamp_numeric[ind_sprung]) * 24 * 3600)
-        zt['Tg'] = max(1.0, (timestamp_numeric[zt['ind_Tg']] - 
-                            timestamp_numeric[zt['ind_Tu']]) * 24 * 3600)
-        
-        # Calculate system order with bounds
-        zt['n'] = min(4, max(1, round(zt['Tu'] / zt['Tg'] * 10 + 1)))  # Limit order to reasonable range
-        zt['T'] = max(1.0, (zt['Tu'] + zt['Tg']) / zt['n'])  # Ensure positive time constant
-        
-        # Create transfer functions with scaled parameters to avoid numerical issues
-        num = [zt['K']]
-        den = [zt['T'], 1]
-        
-        # Create base transfer function
-        sys_base = control.TransferFunction(num, den)
-        
-        # Build series connection carefully
-        zt['G'] = sys_base
-        for _ in range(zt['n'] - 1):
-            zt['G'] = control.series(zt['G'], sys_base)
-        
-        # Discretize with careful parameter selection
-        zt['Ta'] = max(1.0, min(120.0, zt['T'] / 10))  # Sampling time based on time constant
-        
-        # Generate time vector
-        zt['test_time'] = np.arange(0, len(flowrate)) * zt['Ta']
-        
-        try:
-            zt['Gd'] = control.sample_system(zt['G'], zt['Ta'])
-            
-            # Calculate input signal
-            if 'down' in step_dir:
-                input_signal = feed - feed_max
-            else:
-                input_signal = feed - feed_min
-                
-            # Generate output
-            _, yd = control.forced_response(zt['Gd'], T=zt['test_time'], U=input_signal)
-            
-            # Add offset and ensure finite values
-            if 'down' in step_dir:
-                zt['yd'] = yd.flatten() + flowrate_max
-            else:
-                zt['yd'] = yd.flatten() + flowrate_min
-                
-            # Final validation of output
-            if not np.all(np.isfinite(zt['yd'])):
-                raise ValueError("Output contains inf or NaN values")
-                
-            return zt
-            
-        except Exception as inner_e:
-            print(f"Error in discretization or simulation: {inner_e}")
-            # Fallback to simple first order response
-            zt['yd'] = np.zeros_like(flowrate)
-            if 'down' in step_dir:
-                zt['yd'] = flowrate_max - (flowrate_max - flowrate_min) * (1 - np.exp(-zt['test_time'] / zt['T']))
-            else:
-                zt['yd'] = flowrate_min + (flowrate_max - flowrate_min) * (1 - np.exp(-zt['test_time'] / zt['T']))
-            return zt
-            
-    except Exception as e:
-        print(f"Error in zeitkonstantesumme calculation: {e}")
-        traceback.print_exc()
-        return None
+            zt['ind_Tu'] = ind_sprung
+            zt['ind_Tg'] = ind_sprung + 1
+    
+    # Convert time differences to seconds
+    zt['Tu'] = convert_timedelta_to_seconds(timestamps[zt['ind_Tu']] - timestamps[zt['ind_sprung']])
+    zt['Tg'] = convert_timedelta_to_seconds(timestamps[zt['ind_Tg']] - timestamps[zt['ind_Tu']])
+    
+    zt['wert_fuer_n_2'] = 0.575
+    
+    if 'down' in step_dir:
+        zt['y_wert_bei_T_summe'] = flowrate_max - (flowrate_max - flowrate_min) * zt['wert_fuer_n_2']
+        cross_indices = np.where(flowrate_values < zt['y_wert_bei_T_summe'])[0]
+        zt['index_bei_T_summe'] = cross_indices[0] if len(cross_indices) > 0 else ind_sprung
+    else:
+        zt['y_wert_bei_T_summe'] = flowrate_min + (flowrate_max - flowrate_min) * zt['wert_fuer_n_2']
+        cross_indices = np.where(flowrate_values > zt['y_wert_bei_T_summe'])[0]
+        zt['index_bei_T_summe'] = cross_indices[0] if len(cross_indices) > 0 else ind_sprung
+    
+    zt['T_summe'] = convert_timedelta_to_seconds(timestamps[zt['index_bei_T_summe']] - timestamps[zt['ind_sprung']])
+    
+    zt['n'] = round(zt['Tu'] / zt['Tg'] * 10 + 1)
+    zt['T'] = zt['T_summe'] / zt['n']
+    
+    zt['G'] = control.TransferFunction([zt['K']], [zt['T'], 1])
+    for _ in range(zt['n'] - 1):
+        zt['G'] = control.series(zt['G'], control.TransferFunction([1], [zt['T'], 1]))
+    
+    zt['Ta'] = 120
+    zt['test_time'] = np.arange(0, zt['Ta'] * len(timestamps), zt['Ta'])
+    zt['Gd'] = control.sample_system(zt['G'], zt['Ta'])
+    
+    if 'down' in step_dir:
+        input_signal = feed_values - feed_max
+        _, yd = control.forced_response(zt['Gd'], T=zt['test_time'], U=input_signal)
+        zt['yd'] = yd + flowrate_max
+    else:
+        input_signal = feed_values - feed_min
+        _, yd = control.forced_response(zt['Gd'], T=zt['test_time'], U=input_signal)
+        zt['yd'] = yd + flowrate_min
+    
+    return zt
+
+
+def plot_zeitkonstantesumme_ui(i, ui_axes, flowrate, feed, zt):
+    colors = ['#0072BD', '#D95319', '#EDB120', '#7E2F8E', '#77AC30', '#4DBEEE', '#A2142F']
+    const = {
+        'font': 'serif',
+        'fontsize': 12,
+        'fontsizelegend': 8,
+        'fontsizeticks': 10,
+        'linienbreite': 1,
+        'y_min': min(flowrate['interp_y_smooth']) - 0.05 * max(flowrate['interp_y_smooth']),
+        'y_max': max(flowrate['interp_y_smooth']) + 0.05 * max(flowrate['interp_y_smooth'])
+    }
+    color_float = 0.8
+    gray_color = [color_float] * 3
+
+    ui_axes.clear()
+    ui_axes.grid(True, which='both')
+    ui_axes.tick_params(which='both', labelsize=const['fontsizeticks'])
+    ui_axes.set_ylabel('Gas production flow rate [m³/h]', 
+                      fontfamily=const['font'], 
+                      fontsize=const['fontsize'])
+    ui_axes.set_xlabel('Time', 
+                      fontfamily=const['font'], 
+                      fontsize=const['fontsize'])
+    ui_axes.set_title('Sum of time constants method', 
+                     fontfamily=const['font'], 
+                     fontsize=const['fontsize'])
+    ui_axes.set_ylim([const['y_min'], const['y_max']])
+
+    # Main plots
+    line1 = ui_axes.plot(flowrate['interp_dt'], flowrate['interp_y_smooth'],
+                        linestyle='--', 
+                        color=colors[0], linewidth=const['linienbreite'], 
+                        label='Gas production flow rate after preprocessing')
+    
+    ui_axes.scatter(flowrate['interp_dt'].iloc[int(zt['index'])], 
+                   flowrate['interp_y_smooth'].iloc[int(zt['index'])], 
+                   color=gray_color, s=100, marker='o', 
+                   label='Turning point')
+
+    line7 = ui_axes.plot(flowrate['interp_dt'], zt['yd'],
+                        linestyle='-.', 
+                        color=colors[2], linewidth=const['linienbreite'], 
+                        label='Sum of time constants method')
+
+    # Secondary y-axis for substrate feeding rate
+    ax2 = ui_axes.twinx()
+    
+    # Filter substrate data for values > 0
+    feed_df = pd.DataFrame({
+        'time': flowrate['interp_dt'],
+        'feed': feed['interp_diff_substrate_feed']
+    })
+    feed_filtered = feed_df[feed_df['feed'] > 0]
+    
+    y_min_right = feed_filtered['feed'].min() - 0.05 * feed_filtered['feed'].max()
+    y_max_right = feed_filtered['feed'].max() + 0.05 * feed_filtered['feed'].max()
+    ax2.set_ylim([y_min_right, y_max_right])
+    ax2.set_ylabel('Substrate feeding rate [t/3h]', 
+                  fontfamily=const['font'], 
+                  fontsize=const['fontsize'],
+                  color=colors[1])
+    
+    line3 = ax2.plot(feed_filtered['time'], feed_filtered['feed'],
+                     linestyle='-',
+                     color=colors[1], linewidth=const['linienbreite'],
+                     label='Substrate feeding rate')
+
+    # Legend
+    lines = line1 + line7 + line3
+    labels = [l.get_label() for l in lines]
+    ui_axes.legend(lines, labels, loc='best', 
+                  fontsize=const['fontsizelegend'], 
+                  prop={'family': const['font']})
+    
+
 
 def update_model_down_plot_zeitkonstantesumme():
-    """
-    Update the step down plot with time constant sum method.
-    Fixed Series indexing.
-    """
     try:
-        # Check if we have preprocessed data
-        if global_vars['biogas_segment_down'] is None or global_vars['substrate_segment_down'] is None:
-            print("No preprocessed data available. Please preprocess data first.")
+        if global_vars['biogas_segment_down'] is None:
             return
-            
-        # Define constants
-        const = {
-            'font': 'serif',
-            'fontsize': 12,
-            'fontsizelegend': 8,
-            'fontsizeticks': 10,
-            'linienbreite': 1,
-            'marker_size': 4
-        }
-        
-        # Define colors
-        color_biogas = '#0000A7'  # Deep blue for biogas
-        color_substrate = '#C1272D'  # Red for substrate
-        color_model = '#EECC16'  # Yellow for model output
-        
+
         fig_model_down.clear()
         ax1 = fig_model_down.add_subplot(111)
-        ax2 = ax1.twinx()
-        
-        # Get preprocessed data
+
+        # Get data
         biogas_data = global_vars['biogas_segment_down']['SmoothedValueNum']
         substrate_data = global_vars['substrate_segment_down']['FeedingRate']
         timestamps = global_vars['timestamps_down']
 
-        # Process substrate data - convert to numpy arrays for valid data extraction
-        substrate_array = substrate_data.values
-        timestamps_array = np.array(timestamps)
-        valid_mask = substrate_array > 0
-        valid_substrate = substrate_array[valid_mask]
-        valid_timestamps_substrate = timestamps_array[valid_mask]
-
         # Calculate parameters
         feed_max = substrate_data.max()
-        feed_min = np.min(valid_substrate)  # Use numpy min for valid values
+        feed_min = substrate_data[substrate_data > 0].min()
         flowrate_max = biogas_data.max()
         flowrate_min = biogas_data.min()
         ind_sprung = np.argmax(np.diff(substrate_data.values))
+
+        # Calculate inflection point
+        y_smooth = biogas_data.values
+        dy = np.gradient(y_smooth)
+        d2y = np.gradient(dy)
+        ind_wp = np.argmin(np.abs(d2y))
+        steigung_wp = dy[ind_wp]
+
+        flowrate_data = {
+            'interp_y_smooth': biogas_data,
+            'interp_dt': timestamps,
+            'sel_time': timestamps
+        }
         
-        # Calculate margins for y-axis limits
-        biogas_margin = 0.05 * (flowrate_max - flowrate_min)
-        substrate_margin = 0.05 * (feed_max - feed_min)
-        
-        # Set y-axis limits with margins
-        ax1.set_ylim([flowrate_min - biogas_margin, flowrate_max + biogas_margin])
-        ax2.set_ylim([feed_min - substrate_margin, feed_max + substrate_margin])
-        
-        # Calculate zeitkonstantesumme parameters
-        zt_down = zeitkonstantesumme(
-            biogas_data.values,
-            substrate_data.values,
+        feed_data = {
+            'interp_diff_substrate_feed': substrate_data,
+            'interp_dt': timestamps
+        }
+
+        zt_result = zeitkonstantesumme(
+            flowrate_data,
+            feed_data,
             ind_sprung,
             feed_max,
-            feed_min,
+            feed_min, 
             flowrate_max,
             flowrate_min,
-            timestamps,
-            "down"
+            ind_wp,
+            steigung_wp,
+            'down'
         )
-        
-        if zt_down is not None:
-            # Setup axes properties
-            ax1.grid(True)
-            ax1.xaxis.set_minor_locator(AutoMinorLocator())
-            ax1.yaxis.set_minor_locator(AutoMinorLocator())
-            
-            # Plot biogas production rate
-            line1 = ax1.plot(timestamps, biogas_data, 
-                           linestyle='--',
-                           color=color_biogas,
-                           label='Biogas production rate',
-                           linewidth=const['linienbreite'])
-            
-            # Plot time constant sum method result
-            line2 = ax1.plot(timestamps, zt_down['yd'],
-                           linestyle='-.',
-                           color=color_model,
-                           label='Time constant sum method',
-                           linewidth=const['linienbreite'])
-            
-            # Plot substrate feeding rate
-            line3 = ax2.plot(valid_timestamps_substrate, valid_substrate,
-                           linestyle='-',
-                           color=color_substrate,
-                           label='Substrate feeding rate',
-                           linewidth=const['linienbreite'])
-            
-            # Configure axes
-            ax1.set_xlabel('Time', fontname=const['font'], fontsize=const['fontsize'])
-            ax1.set_ylabel('Biogas production rate [m³/h]',
-                         fontname=const['font'],
-                         fontsize=const['fontsize'],
-                         color=color_biogas)
-            ax2.set_ylabel('Substrate feeding rate [t/h]',
-                         fontname=const['font'],
-                         fontsize=const['fontsize'],
-                         color=color_substrate)
-            
-            ax1.set_title('Time constant sum method',
-                         fontname=const['font'],
-                         fontsize=const['fontsize'])
-            
-            # Format time axis
-            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d\n%H:%M'))
-            plt.setp(ax1.xaxis.get_majorticklabels(),
-                    rotation=0,
-                    fontname=const['font'],
-                    fontsize=const['fontsizeticks'])
-            
-            # Configure grid and ticks
-            ax1.tick_params(axis='y', labelcolor=color_biogas, labelsize=const['fontsizeticks'])
-            ax2.tick_params(axis='y', labelcolor=color_substrate, labelsize=const['fontsizeticks'])
-            
-            # Add legend
-            lines = line1 + line2 + line3
-            labels = [l.get_label() for l in lines]
-            ax1.legend(lines, labels,
-                      loc='upper right',
-                      fontsize=const['fontsizelegend'],
-                      prop={'family': const['font']})
-            
-            # Plot time constant points if available
-            if 'ind_Tu' in zt_down and 'ind_Tg' in zt_down:
-                try:
-                    # Safe array indexing for time constant points
-                    tu_idx = min(max(0, int(zt_down['ind_Tu'])), len(biogas_data)-1)
-                    tg_idx = min(max(0, int(zt_down['ind_Tg'])), len(biogas_data)-1)
-                    
-                    # Plot Tu point using direct numpy array indexing
-                    ax1.plot(timestamps[tu_idx], biogas_data.values[tu_idx], 'o',
-                            color=color_model,
-                            markersize=const['marker_size'])
-                    ax1.text(timestamps[tu_idx], 
-                            biogas_data.values[tu_idx] + biogas_margin/2,
-                            f"Tu = {zt_down['Tu']:.1f}s",
-                            fontsize=8,
-                            color=color_model)
-                    
-                    # Plot Tg point using direct numpy array indexing
-                    ax1.plot(timestamps[tg_idx], biogas_data.values[tg_idx], 'o',
-                            color=color_model,
-                            markersize=const['marker_size'])
-                    ax1.text(timestamps[tg_idx], 
-                            biogas_data.values[tg_idx] + biogas_margin/2,
-                            f"Tg = {zt_down['Tg']:.1f}s",
-                            fontsize=8,
-                            color=color_model)
-                except Exception as e:
-                    print(f"Error plotting time constants: {e}")
-            
-            # Calculate and update metrics
-            metrics = calculate_metrics(biogas_data.values, zt_down['yd'])
+
+        if zt_result is not None:
+            plot_zeitkonstantesumme_ui(0, ax1, flowrate_data, feed_data, zt_result)
+            metrics = calculate_metrics(biogas_data.values, zt_result['yd'])
             update_metrics_table(tree_down, metrics)
-            
-            # Adjust layout and draw
+
+            global_vars["down_scenario_data"] = {
+                "time": timestamps,
+                "flow_measured": biogas_data,
+                "model_output": zt_result['yd'],
+                "feed": substrate_data,
+                "Tu": zt_result['Tu'],
+                "Tg": zt_result['Tg'],
+                "T_summe": zt_result['T_summe'],
+                "n": zt_result['n'],
+                "K": zt_result['K']
+            }
+
             fig_model_down.tight_layout()
             canvas_model_down.draw()
-            
+
     except Exception as e:
-        print(f"Error in update_model_down_plot_zeitkonstantesumme: {e}")
+        print(f"Error in downward plot zeitkonstantesumme: {e}")
         traceback.print_exc()
 
 def update_model_up_plot_zeitkonstantesumme():
-    """
-    Update the step up plot with time constant sum method.
-    Based on upward plotting functions with zeitkonstantesumme calculation.
-    """
     try:
-        # Check if we have preprocessed data
-        if global_vars['biogas_segment_up'] is None or global_vars['substrate_segment_up'] is None:
-            print("No preprocessed data available. Please preprocess data first.")
+        if global_vars['biogas_segment_up'] is None:
             return
-            
-        # Define constants
-        const = {
-            'font': 'serif',
-            'fontsize': 12,
-            'fontsizelegend': 8,
-            'fontsizeticks': 10,
-            'linienbreite': 1,
-            'marker_size': 4
-        }
-        
-        # Define colors with enhanced organization
-        colors = {
-            'biogas_line': '#0000A7',      # Deep blue for biogas line
-            'zeitkonstant': '#EECC16',      # Yellow for time constant sum line
-            'substrate': '#C1272D',        # Red for substrate line
-            'grid': '#E6E6E6',            # Light gray for grid
-            'markers': [0.8, 0.8, 0.8]    # Gray for markers
-        }
-            
+
         fig_model_up.clear()
         ax1 = fig_model_up.add_subplot(111)
-        ax2 = ax1.twinx()
-        
-        # Get preprocessed data
+
         biogas_data = global_vars['biogas_segment_up']['SmoothedValueNum']
         substrate_data = global_vars['substrate_segment_up']['FeedingRate']
         timestamps = global_vars['timestamps_up']
 
-        # Process substrate data - convert to numpy arrays for valid data extraction
-        substrate_array = substrate_data.values
-        timestamps_array = np.array(timestamps)
-        valid_mask = substrate_array > 0
-        valid_substrate = substrate_array[valid_mask]
-        valid_timestamps_substrate = timestamps_array[valid_mask]
-
-        # Calculate parameters
         feed_max = substrate_data.max()
-        feed_min = np.min(valid_substrate)
+        feed_min = substrate_data[substrate_data > 0].min()
         flowrate_max = biogas_data.max()
         flowrate_min = biogas_data.min()
         ind_sprung = np.argmax(np.diff(substrate_data.values))
 
-        # Set y-axis limits with 5% padding
-        y1_min = flowrate_min - 0.05 * flowrate_max
-        y1_max = flowrate_max + 0.05 * flowrate_max
-        y2_min = feed_min - 0.05 * feed_max
-        y2_max = feed_max + 0.05 * feed_max
+        y_smooth = biogas_data.values
+        dy = np.gradient(y_smooth)
+        d2y = np.gradient(dy)
+        ind_wp = np.argmin(np.abs(d2y))
+        steigung_wp = dy[ind_wp]
+
+        flowrate_data = {
+            'interp_y_smooth': biogas_data,
+            'interp_dt': timestamps,
+            'sel_time': timestamps
+        }
         
-        # Calculate zeitkonstantesumme parameters
-        zt_up = zeitkonstantesumme(
-            biogas_data.values,
-            substrate_data.values,
+        feed_data = {
+            'interp_diff_substrate_feed': substrate_data,
+            'interp_dt': timestamps
+        }
+
+        zt_result = zeitkonstantesumme(
+            flowrate_data,
+            feed_data,
             ind_sprung,
             feed_max,
-            feed_min,
+            feed_min, 
             flowrate_max,
             flowrate_min,
-            timestamps,
-            "up"
+            ind_wp,
+            steigung_wp,
+            'up'
         )
-        
-        if zt_up is not None:
-            # Configure primary axis (ax1)
-            ax1.set_xlabel('Time', fontname=const['font'], fontsize=const['fontsize'])
-            ax1.set_ylabel('Biogas production rate [m³/h]', 
-                          fontname=const['font'], 
-                          fontsize=const['fontsize'],
-                          color=colors['biogas_line'])
-            ax1.set_title('Time Constant Sum Method', 
-                         fontname=const['font'], 
-                         fontsize=const['fontsize'])
-            
-            # Set axis properties
-            ax1.grid(True, which='both')
-            ax1.set_ylim([y1_min, y1_max])
-            ax1.tick_params(axis='both', which='both', 
-                          labelsize=const['fontsizeticks'])
-            
-            # Plot biogas production rate
-            line1 = ax1.plot(timestamps, biogas_data, '--', 
-                            color=colors['biogas_line'],
-                            linewidth=const['linienbreite'],
-                            label='Biogas production rate')
-            
-            # Plot time constant sum model result
-            line2 = ax1.plot(timestamps, zt_up['yd'], '-.', 
-                            color=colors['zeitkonstant'],
-                            linewidth=const['linienbreite'],
-                            label='Time constant sum method')
-            
-            # Configure secondary axis (ax2)
-            ax2.set_ylabel('Substrate feeding rate [t/h]', 
-                          fontname=const['font'],
-                          fontsize=const['fontsize'],
-                          color=colors['substrate'])
-            ax2.set_ylim([y2_min, y2_max])
-            
-            # Plot substrate feeding rate
-            line3 = ax2.plot(valid_timestamps_substrate, valid_substrate, '-',
-                            color=colors['substrate'],
-                            linewidth=const['linienbreite'],
-                            label='Substrate feeding rate')
-            
-            # Format time axis
-            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d\n%H:%M'))
-            plt.setp(ax1.xaxis.get_majorticklabels(), rotation=0)
-            
-            # Configure axis colors
-            ax1.tick_params(axis='y', labelcolor=colors['biogas_line'])
-            ax2.tick_params(axis='y', labelcolor=colors['substrate'])
-            
-            # Add legend
-            lines = line1 + line2 + line3
-            labels = [l.get_label() for l in lines]
-            ax1.legend(lines, labels, 
-                      loc='upper right',
-                      fontsize=const['fontsizelegend'],
-                      prop={'family': const['font']})
-            
-            # Plot time constant points if available
-            if 'ind_Tu' in zt_up and 'ind_Tg' in zt_up:
-                try:
-                    # Safe array indexing for time constant points
-                    tu_idx = min(max(0, int(zt_up['ind_Tu'])), len(biogas_data)-1)
-                    tg_idx = min(max(0, int(zt_up['ind_Tg'])), len(biogas_data)-1)
-                    
-                    # Plot Tu point
-                    ax1.plot(timestamps[tu_idx], biogas_data.values[tu_idx], 'o',
-                            color=colors['zeitkonstant'],
-                            markersize=const['marker_size'])
-                    ax1.text(timestamps[tu_idx], 
-                            biogas_data.values[tu_idx] + (y1_max - y1_min)/20,
-                            f"Tu = {zt_up['Tu']:.1f}s",
-                            fontsize=8,
-                            color=colors['zeitkonstant'])
-                    
-                    # Plot Tg point
-                    ax1.plot(timestamps[tg_idx], biogas_data.values[tg_idx], 'o',
-                            color=colors['zeitkonstant'],
-                            markersize=const['marker_size'])
-                    ax1.text(timestamps[tg_idx], 
-                            biogas_data.values[tg_idx] + (y1_max - y1_min)/20,
-                            f"Tg = {zt_up['Tg']:.1f}s",
-                            fontsize=8,
-                            color=colors['zeitkonstant'])
-                except Exception as e:
-                    print(f"Error plotting time constants: {e}")
-            
-            # Calculate and update metrics
-            metrics = calculate_metrics(biogas_data.values, zt_up['yd'])
+
+        if zt_result is not None:
+            plot_zeitkonstantesumme_ui(0, ax1, flowrate_data, feed_data, zt_result)
+            metrics = calculate_metrics(biogas_data.values, zt_result['yd'])
             update_metrics_table(tree_up, metrics)
-            
-            # Adjust layout and draw
+
+            global_vars["up_scenario_data"] = {
+                "time": timestamps,
+                "flow_measured": biogas_data,
+                "model_output": zt_result['yd'],
+                "feed": substrate_data,
+                "Tu": zt_result['Tu'],
+                "Tg": zt_result['Tg'],
+                "T_summe": zt_result['T_summe'],
+                "n": zt_result['n'],
+                "K": zt_result['K']
+            }
+
             fig_model_up.tight_layout()
             canvas_model_up.draw()
-            
+
     except Exception as e:
-        print(f"Error in update_model_up_plot_zeitkonstantesumme: {e}")
+        print(f"Error in upward plot zeitkonstantesumme: {e}")
         traceback.print_exc()
 
 
