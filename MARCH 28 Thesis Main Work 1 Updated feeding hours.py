@@ -3229,17 +3229,20 @@ def feeding_plan_ui(start_date, simulation_results=None):
         time_daily = [start_date + timedelta(days=i) for i in range(days)]
         time_two_hourly = []
 
-        # Generate time points every 2 hours (12 periods per day)
-        for i in range(days):
-            day_date = start_date + timedelta(days=i)
-            
-            for hour in range(0, 24, 2):
-                # Create a datetime with the explicit hour set
-                entry_time = datetime.combine(
-                    day_date,  # Use the date directly, no need to call .date()
-                    time(hour=hour, minute=0, second=0)
-                )
-                time_two_hourly.append(entry_time)
+        # Generate time points every 2 hours starting at 8:00 AM on the first day
+        first_day_time = datetime.combine(
+            start_date if not isinstance(start_date, datetime) else start_date.date(),
+            time(hour=8, minute=0, second=0)
+        )
+
+        # Create the first time point at 8:00 AM
+        time_two_hourly.append(first_day_time)
+
+        # Generate the rest of the time points every 2 hours
+        current_time = first_day_time
+        for _ in range(days * 12 - 1):  # -1 because we already added the first time point
+            current_time = current_time + timedelta(hours=2)
+            time_two_hourly.append(current_time)
                 
         # Retrieve substrate values - NEVER use default values
         if simulation_results is not None and 'substrate_feeding' in simulation_results:
